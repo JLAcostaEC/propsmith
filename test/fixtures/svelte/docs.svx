@@ -1,0 +1,13 @@
+# Button
+
+Buttons for primary and secondary actions.
+
+## Component Props
+
+<!-- props:Button -->
+<!-- /props:Button -->
+
+### Shared types
+
+<!-- props:@types -->
+<!-- /props:@types -->

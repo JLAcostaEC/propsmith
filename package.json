@@ -1,0 +1,84 @@
+{
+  "name": "@jlacostaec/propsmith",
+  "version": "0.0.1",
+  "description": "Generate props tables from TypeScript types into markdown, and keep them from going stale",
+  "keywords": [
+    "CLI",
+    "documentation",
+    "jsdoc",
+    "markdown",
+    "props",
+    "react",
+    "svelte",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Jorge Acosta",
+    "url": "https://github.com/JLAcostaEC"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JLAcostaEC/propsmith.git"
+  },
+  "bin": {
+    "propsmith": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/src/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/src/adapters/index.d.ts",
+      "default": "./dist/src/adapters/index.js"
+    },
+    "./i18n/adapters": {
+      "types": "./dist/src/i18n/adapters/index.d.ts",
+      "default": "./dist/src/i18n/adapters/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "provenance": true
+  },
+  "scripts": {
+    "dev": "tsdown --watch",
+    "build": "tsdown && publint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "bench": "vitest bench --run",
+    "lint": "oxlint && oxfmt --check .",
+    "format": "oxfmt --write .",
+    "changeset:version": "changeset version && git add --all",
+    "changeset:publish": "changeset publish"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "oxc-parser": "^0.144.0",
+    "tinyglobby": "^0.2.17"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^1.0.0",
+    "@changesets/cli": "^3.0.0",
+    "@types/node": "^26.2.0",
+    "oxfmt": "^0.63.0",
+    "oxlint": "^1.78.0",
+    "publint": "^0.3.23",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.4.0"
+}

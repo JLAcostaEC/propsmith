@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "moduleResolution": "NodeNext",
+    "module": "NodeNext",
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowJs": true,
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src/**/*", "bin.ts", "test/**/*.ts", "*.config.ts"],
+  // Fixtures are parser input, not project source: they reference framework
+  // types that are deliberately not installed, and propsmith never resolves them.
+  "exclude": ["node_modules", "dist", "test/fixtures"]
+}
