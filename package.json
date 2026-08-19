@@ -1,6 +1,6 @@
 {
   "name": "@jlacostaec/propsmith",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Generate props tables from TypeScript types into markdown, and keep them from going stale",
   "keywords": [
     "CLI",
