@@ -47,7 +47,7 @@ prose are not tags.
 | `@deprecated [reason]` | a **member**   | strikes the name; the reason is appended to the description, inline                                       |
 | `@see <target>`        | a **member**   | explicit link for that type. Wins over everything, including resolution                                   |
 | `@inheritDoc [Name]`   | a **member**   | take the description and `@default` from a type, named or the member's own                                |
-| `@type <text>`         | a **member**   | overrides the Type cell entirely. Last resort, and `check` reports every use                              |
+| `@type <text>`         | a **member**   | overrides the Type cell: `{braced}` is resolved as a type, bare text is prose. `check` reports every use  |
 
 `@internal`, `@deprecated`, `@see` and `@inheritDoc` are TSDoc standard: if the IDE already shows
 it, propsmith honours it instead of inventing a synonym.
@@ -204,7 +204,30 @@ Full rules, including how to turn the automatic half off, in [types](./types.md#
 
 ### `@type <text>`
 
-The escape hatch. It replaces the Type cell with your text, unmodified:
+The escape hatch, in two spellings — and the braces are what tell them apart, exactly as JSDoc has
+always written a type.
+
+**`@type {…}` is TypeScript.** The text is resolved like a declared type: names go through the
+symbol index, a top-level union is split into one code span per member, `types.links` and the
+glossary apply, and `check` reports it coming up short like any other type.
+
+```ts
+export type ButtonGenerics = "button" | "a" | "div";
+
+/** What the button renders as. @type {ButtonGenerics} */
+generic?: unknown;
+```
+
+```md
+| `generic` | `"button"` &#124; `"a"` &#124; `"div"` | | What the button renders as. |
+```
+
+An object type doubles its braces, as JSDoc's record syntax does — `@type {{ id: string }}`. Only a
+`{` closed by the very last character counts, so `@type {'sm'} or {'lg'}` is prose, not a
+half-stripped type.
+
+**`@type <text>` without braces is prose.** It replaces the Type cell with your words, printed as
+written:
 
 ```ts
 /** Layout override. @type A CSS length */
@@ -212,11 +235,14 @@ width?: number | string;
 ```
 
 ```md
-| `width` | A CSS length | | Layout override. |
+| `width` | `A CSS length` | | Layout override. |
 ```
 
-Because it permits a table that disagrees with the code, **every use is reported by `check`** as a
+Because both permit a table that disagrees with the code, **every use is reported by `check`** as a
 `type-override-used` warning.
+
+`@type` on a **branch of an intersection** is a different thing — it labels that summary row rather
+than a prop's cell. See [types](./types.md#naming-a-row-by-hand).
 
 ## Tier 2 — flags
 

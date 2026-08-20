@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { assertNoHtml } from "../src/render/escape.js";
+import { DEFAULT_EXTRAS_LABELS } from "../src/render/extras.js";
 import { createSymbolIndex } from "../src/resolve/index.js";
 import { glossaryAnchor, renderType } from "../src/resolve/render-type.js";
 import type { RenderedType } from "../src/resolve/render-type.js";
@@ -45,7 +46,13 @@ interface RenderOptions {
 function render(typeText: string, opts: RenderOptions = {}): RenderedType {
   return renderType(typeText, {
     index: createSymbolIndex(opts.decls ?? []),
-    types: { inlineUnder: 60, links: {}, inherit: true, ...opts.types },
+    types: {
+      inlineUnder: 60,
+      links: {},
+      inherit: true,
+      extras: { labels: DEFAULT_EXTRAS_LABELS, origins: {} },
+      ...opts.types,
+    },
     glossary: opts.glossary,
     see: opts.see,
   });

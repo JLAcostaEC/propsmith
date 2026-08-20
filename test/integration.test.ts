@@ -82,6 +82,12 @@ const reactConfig = (): PropsmithConfig => ({
   types: { inlineUnder: 60 },
 });
 
+const overridesConfig = (): PropsmithConfig => ({
+  sources: ["*.ts"],
+  outputs: [{ name: "docs", files: ["docs.md"] }],
+  types: { inlineUnder: 60 },
+});
+
 describe("vanilla TypeScript, no framework", () => {
   const config = vanillaConfig;
 
@@ -375,5 +381,122 @@ describe("drift detection survives a formatter", () => {
 
     expect(drift?.message).toContain("2 props with no row: baseUrl, retry");
     expect(drift?.message).toContain("1 row with no prop: retries");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("type overrides and intersection labels", () => {
+  const config = overridesConfig;
+
+  it("resolves a braced @type through the symbol index", async () => {
+    const cwd = stage("overrides");
+    const result = await execute(cwd, config(), "dry-run");
+
+    expect(errorsOf(result)).toEqual([]);
+
+    const table = bodyOf(result, "Polymorphic");
+
+    // `@type {ButtonGenerics}` is a type, so it earns what a declared type
+    // earns — and `ButtonGenerics` lives in a file carrying no tag at all, so
+    // only the on-demand second pass can find it.
+    expect(table).toContain('`"button"` &#124; `"a"` &#124; `"div"`');
+    expect(table).not.toContain("`ButtonGenerics`");
+  });
+
+  it("splits a braced @type union into one code span per member", async () => {
+    const cwd = stage("overrides");
+    const result = await execute(cwd, config(), "dry-run");
+    const table = bodyOf(result, "Polymorphic");
+
+    // A pipe inside a code span splits the cell, and `&#124;` inside one does
+    // not decode — so the separator has to sit between two spans.
+    expect(table).toContain("`'button'` &#124; `'a'` &#124; `'div'`");
+    expect(table).not.toContain("`'button' &#124; 'a' &#124; 'div'`");
+  });
+
+  it("still prints an unbraced @type as the prose it is", async () => {
+    const cwd = stage("overrides");
+    const result = await execute(cwd, config(), "dry-run");
+    const table = bodyOf(result, "Polymorphic");
+
+    expect(table).toContain("`A CSS length`");
+  });
+
+  it("reports every override, braced or not", async () => {
+    const cwd = stage("overrides");
+    const result = await execute(cwd, config(), "dry-run");
+
+    const overrides = result.diagnostics
+      .filter((d) => d.code === "type-override-used")
+      .map((d) => d.message);
+    expect(overrides).toHaveLength(3);
+    expect(overrides.join(" ")).toContain("PolymorphicButtonProps.generic");
+  });
+
+  it("labels the intersection rows from the branch and from the default wording", async () => {
+    const cwd = stage("overrides");
+    const result = await execute(cwd, config(), "dry-run");
+    const table = bodyOf(result, "Polymorphic");
+
+    // The branch carries a JSDoc block: its `@type` names the row and its
+    // sentence fills the Description cell.
+    // The label is the tag's own text, quotes included.
+    expect(table).toContain("| `PolymorphicProps<'span'>` | | | The element's own props. |");
+    // The undocumented branch takes the default wording, which for an `Omit`
+    // reads as a subtraction.
+    expect(table).toContain("`AriaProps` without `describedBy`");
+  });
+
+  it("takes the wording of every row from types.extras", async () => {
+    const cwd = stage("overrides");
+    const result = await execute(
+      cwd,
+      {
+        ...config(),
+        types: {
+          inlineUnder: 60,
+          extras: {
+            labels: { omit: "{origin} sin {keys}" },
+            origins: { AriaProps: "Accesibilidad" },
+          },
+        },
+      },
+      "dry-run",
+    );
+    const table = bodyOf(result, "Polymorphic");
+
+    expect(table).toContain("Accesibilidad");
+    expect(table).not.toContain("without");
+    // A branch that named itself still wins over both.
+    expect(table).toContain("| `PolymorphicProps<'span'>` |");
+  });
+
+  it("rejects a template that cannot fill its own placeholders", () => {
+    const { diagnostics } = resolveConfig(
+      {
+        ...overridesConfig(),
+        types: { extras: { labels: { elementAttributes: "Attributes of {keys}" } } },
+      },
+      "/project",
+    );
+
+    expect(diagnostics.map((d) => d.message).join(" ")).toContain(
+      "`types.extras.labels.elementAttributes` uses {keys}",
+    );
+  });
+
+  it("rejects a label that would put an HTML tag in the table", () => {
+    const { diagnostics } = resolveConfig(
+      {
+        ...overridesConfig(),
+        types: { extras: { origins: { AriaProps: "Props of <span>" } } },
+      },
+      "/project",
+    );
+
+    expect(diagnostics.map((d) => d.message).join(" ")).toContain(
+      "`types.extras.origins.AriaProps` contains an HTML tag",
+    );
   });
 });

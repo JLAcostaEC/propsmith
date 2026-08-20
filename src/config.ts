@@ -17,9 +17,11 @@ import { pathToFileURL } from "node:url";
 import type {
   ColumnId,
   Diagnostic,
+  ExtrasLabels,
   OutputConfig,
   PropsmithConfig,
   ResolvedConfig,
+  ResolvedExtras,
   ResolvedOutput,
   ResolvedTypes,
   SourceAdapter,
@@ -27,6 +29,8 @@ import type {
 } from "./types.js";
 import { typescriptAdapter } from "./adapters/typescript.js";
 import { parseJson } from "./json.js";
+import { containsHtmlTag } from "./render/escape.js";
+import { DEFAULT_EXTRAS_LABELS, EXTRAS_PLACEHOLDERS } from "./render/extras.js";
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -149,6 +153,7 @@ export function resolveConfig(
     inlineUnder,
     links: toStringRecord(config.types?.links),
     inherit: config.types?.inherit !== false,
+    extras: toExtras(config.types?.extras, diagnostics),
   };
   const glossary = config.types?.glossary;
   if (isNonEmptyString(glossary)) {
@@ -402,6 +407,97 @@ function toTagRecord(value: unknown): Record<string, TagRender> {
     if (render === "badge" || render === "column") out[key] = render;
   }
   return out;
+}
+
+/** `{keys}` and friends, for checking a template only fills what it can. */
+const PLACEHOLDER = /\{(\w+)\}/g;
+
+/**
+ * Label templates and per-origin labels for the extra rows.
+ *
+ * A template is only accepted when every placeholder in it is one this kind of
+ * row can fill: `Element Attributes ({keys})` would render as
+ * `Element Attributes` and quietly lose the row's whole point, so it is a
+ * config error rather than a surprise in the output.
+ */
+function toExtras(value: unknown, diagnostics: Diagnostic[]): ResolvedExtras {
+  const labels: ExtrasLabels = { ...DEFAULT_EXTRAS_LABELS };
+  const extras =
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  const rawLabels =
+    typeof extras.labels === "object" && extras.labels !== null
+      ? (extras.labels as Record<string, unknown>)
+      : {};
+
+  for (const [kind, template] of Object.entries(rawLabels)) {
+    if (!isLabelKind(kind)) {
+      const kinds = Object.keys(EXTRAS_PLACEHOLDERS).join(", ");
+      diagnostics.push(
+        configError(
+          `unknown \`types.extras.labels.${kind}\` — the row kinds with a label are ${kinds}.`,
+        ),
+      );
+      continue;
+    }
+    if (!isNonEmptyString(template)) {
+      diagnostics.push(
+        configError(`\`types.extras.labels.${kind}\` must be a non-empty string template.`),
+      );
+      continue;
+    }
+    if (containsHtmlTag(template)) {
+      diagnostics.push(htmlInLabel(`types.extras.labels.${kind}`, template));
+      continue;
+    }
+    const allowed = EXTRAS_PLACEHOLDERS[kind];
+    const unfillable = [...template.matchAll(PLACEHOLDER)]
+      .map((match) => match[1] as string)
+      .filter((name) => !allowed.includes(name));
+    if (unfillable.length > 0) {
+      const wrong = unfillable.map(placeholder).join(", ");
+      const right = allowed.map(placeholder).join(", ");
+      diagnostics.push(
+        configError(
+          `\`types.extras.labels.${kind}\` uses ${wrong}, which it cannot fill — ` +
+            `it may use ${right}.`,
+        ),
+      );
+      continue;
+    }
+    labels[kind] = template;
+  }
+
+  const origins: Record<string, string> = {};
+  for (const [origin, template] of Object.entries(toStringRecord(extras.origins))) {
+    if (containsHtmlTag(template)) {
+      diagnostics.push(htmlInLabel(`types.extras.origins.${origin}`, template));
+      continue;
+    }
+    origins[origin] = template;
+  }
+
+  return { labels, origins };
+}
+
+/**
+ * A label is the one place a config writes prose straight into the output, so it
+ * is the one place that could smuggle in the HTML tag propsmith promises never
+ * to emit. Caught here it is a config error; caught while rendering it is an
+ * exception halfway through a run.
+ */
+function htmlInLabel(field: string, template: string): Diagnostic {
+  return configError(
+    `\`${field}\` contains an HTML tag (${template}) — propsmith never emits one. ` +
+      "Wrap the type in backticks, or use a placeholder like {origin}.",
+  );
+}
+
+function isLabelKind(name: string): name is keyof ExtrasLabels {
+  return Object.hasOwn(EXTRAS_PLACEHOLDERS, name);
+}
+
+function placeholder(name: string): string {
+  return `{${name}}`;
 }
 
 function toStringRecord(value: unknown): Record<string, string> {

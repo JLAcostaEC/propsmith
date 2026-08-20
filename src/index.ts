@@ -7,6 +7,7 @@
  */
 
 export { DEFAULT_COLUMNS, defineConfig, loadConfig, resolveConfig } from "./config.js";
+export { DEFAULT_EXTRAS_LABELS } from "./render/extras.js";
 export { discoverSources, discoverTargets } from "./discovery.js";
 export { extractFile } from "./extract/index.js";
 export { run } from "./run.js";
@@ -21,6 +22,8 @@ export type {
   ExtractResult,
   ExtractedScript,
   ExtraRow,
+  ExtrasConfig,
+  ExtrasLabels,
   FileChange,
   I18nAdapter,
   KeyContext,
@@ -32,6 +35,7 @@ export type {
   PropsmithConfig,
   Region,
   ResolvedConfig,
+  ResolvedExtras,
   ResolvedOutput,
   ResolvedTypes,
   RunMode,

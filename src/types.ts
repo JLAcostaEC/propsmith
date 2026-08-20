@@ -33,7 +33,10 @@ export interface ExtraRow {
   keys?: string[];
   /** The referenced type name, e.g. `FSInput` or `HTMLButtonAttributes`. */
   origin?: string;
-  /** Rendered description cell. */
+  /**
+   * Rendered description cell. Comes from the JSDoc summary written on the
+   * branch itself; plain text always, never an i18n expression.
+   */
   note?: string;
 }
 
@@ -56,6 +59,12 @@ export interface MemberDoc {
   see?: string;
   /** `@type` override for the Type cell. Recorded so `check` can report it. */
   typeOverride?: string;
+  /**
+   * How `typeOverride` is rendered. `text` is the escape hatch — prose, printed
+   * as written; `type` is the `@type {…}` form, whose text is TypeScript and is
+   * resolved exactly like a declared type. Absent means `text`.
+   */
+  typeOverrideKind?: "text" | "type";
   /**
    * `@inheritDoc`: the type to take the description from, or `true` when the
    * tag names none and the member's own type is used.
@@ -278,6 +287,37 @@ export interface OutputConfig {
   glossary?: string;
 }
 
+/** The label template of every extra row kind that has one. */
+export interface ExtrasLabels {
+  /** `Pick<FSInput, 'a' | 'b'>` — the keys it keeps. */
+  pick: string;
+  /** `Omit<X, 'children'>` — the origin, minus the keys it drops. */
+  omit: string;
+  /** `HTMLButtonAttributes` — the DOM element it carries attributes for. */
+  elementAttributes: string;
+}
+
+/**
+ * Wording and per-type overrides for the summary rows an intersection produces.
+ *
+ * These rows are the one place propsmith writes prose, so they are the one
+ * place that has to be sayable in another voice — or another language.
+ */
+export interface ExtrasConfig {
+  /**
+   * Label templates by row kind. `{keys}`, `{origin}`, `{element}` and
+   * `{text}` are filled with code spans; everything else is prose.
+   */
+  labels?: Partial<ExtrasLabels>;
+  /**
+   * Origin type name -> the whole label, for a type whose rows should read the
+   * same wherever it appears. Matched against the branch's origin as written
+   * (`PolymorphicProps<'span'>`) and against its bare name
+   * (`PolymorphicProps`), so one entry covers every instantiation.
+   */
+  origins?: Record<string, string>;
+}
+
 export interface TypesConfig {
   /** Max characters for an inlined definition. `0` disables inlining. */
   inlineUnder?: number;
@@ -290,6 +330,8 @@ export interface TypesConfig {
    * is declared with. Defaults to `true`. `@inheritDoc` works either way.
    */
   inherit?: boolean;
+  /** Wording of the summary rows an intersection produces. */
+  extras?: ExtrasConfig;
 }
 
 export interface PropsmithConfig {
@@ -315,10 +357,17 @@ export interface ResolvedOutput {
   glossary?: string;
 }
 
+/** `ExtrasConfig` with every template filled in. */
+export interface ResolvedExtras {
+  labels: ExtrasLabels;
+  origins: Record<string, string>;
+}
+
 export interface ResolvedTypes {
   inlineUnder: number;
   links: Record<string, string>;
   inherit: boolean;
+  extras: ResolvedExtras;
   glossary?: string;
 }
 

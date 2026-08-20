@@ -242,17 +242,107 @@ you read that cell often, extract a named type.
 ## Intersections
 
 An intersection member that is not an object literal does not expand into rows. It becomes one
-summary row:
+summary row, and because that row says what the branch _contributes_, its Name cell is the one place
+propsmith writes prose:
 
-| intersection member                                                                    | row                                                                                  |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| a type from an element-attribute module, or named `HTML*Attributes` / `SVG*Attributes` | `Element Attributes (button)` — the element from the type argument, or from the name |
-| `Pick<FSInput, 'placeholder' \| 'disabled'>`                                           | `` `placeholder`, `disabled` from FSInput ``                                         |
-| `Omit<X, 'a'>`                                                                         | the same form, from the remaining keys                                               |
-| a bare reference to another type                                                       | the reference, verbatim                                                              |
+| intersection member                                                                    | row                                                 |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| a type from an element-attribute module, or named `HTML*Attributes` / `SVG*Attributes` | Element Attributes (`button`)                       |
+| `Pick<FSInput, 'placeholder' \| 'disabled'>`                                           | `` `placeholder`, `disabled` from `FSInput` ``      |
+| `Omit<PolymorphicProps<'span'>, 'children'>`                                           | `` `PolymorphicProps<'span'>` without `children` `` |
+| a bare reference to another type                                                       | the reference, verbatim                             |
 
 The keys of a `Pick` or an `Omit` are string literals in the AST, so they are read directly. An
-interface's `extends` clauses are handled identically. Summary rows carry a Name cell and nothing
-else.
+interface's `extends` clauses are handled identically.
+
+**`Omit` is not `Pick` spelled differently.** `Pick` names the keys it keeps, so listing them _is_
+the row. `Omit` names the keys it removes, and what survives cannot be known syntactically — so the
+row leads with the origin and reads the keys as a subtraction. A row that said
+`` `children` from `PolymorphicProps<'span'>` `` would state the opposite of the truth.
+
+`Pick<X, K>` behind a type parameter has no literal keys to name, so that row is the branch verbatim.
+
+### The wording
+
+```ts
+types: {
+  extras: {
+    labels: {
+      pick: "{keys} from {origin}",
+      omit: "{origin} without {keys}",
+      elementAttributes: "Element Attributes ({element})",
+    },
+  },
+}
+```
+
+The defaults, and the whole set. Four placeholders are substituted, each **inside a code span**,
+while the words around them stay prose:
+
+| placeholder | filled with                                   | available in        |
+| ----------- | --------------------------------------------- | ------------------- |
+| `{keys}`    | the literal keys, comma-separated             | `pick`, `omit`      |
+| `{origin}`  | the type the keys come from, as written       | every template      |
+| `{element}` | the DOM element the attributes type documents | `elementAttributes` |
+| `{text}`    | the branch, verbatim as you wrote it          | every template      |
+
+A placeholder with nothing to fill it leaves nothing behind, and the parentheses wrapping it go too:
+an attributes type whose element cannot be read renders as `Element Attributes`, not
+`Element Attributes ()`. A template using a placeholder its row cannot fill — `{keys}` in
+`elementAttributes` — is a config error rather than a row that quietly loses its point, and so is a
+template carrying an HTML tag.
+
+Translating the tables? These three strings are the only English propsmith writes into a Name cell.
+Deprecation notices and descriptions go through the [i18n lane](./i18n.md) instead; a summary row is
+not keyed, so its wording lives here.
+
+### One label for one type
+
+```ts
+types: {
+  extras: {
+    origins: {
+      PolymorphicProps: "The element's own props",
+    },
+  },
+}
+```
+
+Keyed by the origin type, for a type whose rows should read the same wherever it appears. The lookup
+tries the origin as written (`PolymorphicProps<'span'>`) and then its bare name, so one entry covers
+every instantiation — and the value is a template like any other, so it can still interpolate:
+`"The element itself ({keys} removed)"`.
+
+This is also the only way to reword a **plain reference** row, which has no template of its own.
+
+### Naming a row by hand
+
+A JSDoc block on the branch itself beats every template and every configured origin — it is you
+naming this one row:
+
+```ts
+export type SpanButtonProps = {
+  /** The label. */
+  label: string;
+} &
+  /** The element's own props. @type {PolymorphicProps<'span'>} */
+  Omit<PolymorphicProps<"span">, "children">;
+```
+
+```md
+| `PolymorphicProps<'span'>` | | | The element's own props. |
+```
+
+Two things come out of that block:
+
+- **`@type`** becomes the Name cell. The text is code-spanned, because a `@type` names a type;
+  braces are accepted and stripped, so it reads the same as it does on a member. It is a **label**,
+  not a type to resolve — it is never looked up, linked or split. For prose, use
+  `types.extras.origins`.
+- **The first paragraph** becomes the Description cell — the only content a summary row can carry
+  beyond its name. It is written as plain text, in every output.
+
+The row's data is untouched: `kind`, `keys` and `origin` still say what the branch really is, so
+`--json` and any custom renderer keep the facts.
 
 Related: [tags](./tags.md), [output](./output.md), [configuration](./configuration.md#types).

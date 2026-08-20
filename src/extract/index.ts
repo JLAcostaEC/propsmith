@@ -24,12 +24,19 @@ import type {
   Diagnostic,
   ExtraRow,
   ExtractResult,
+  ExtrasLabels,
   MemberDoc,
+  ResolvedExtras,
   SourceRef,
   TagRender,
   TypeDeclaration,
 } from "../types.js";
 import { codeSpan } from "../render/escape.js";
+import {
+  DEFAULT_EXTRAS_LABELS,
+  type ExtraLabelValues,
+  formatExtraLabel,
+} from "../render/extras.js";
 import { attachComments, type ParsedJSDoc } from "./jsdoc.js";
 
 export interface ExtractInput {
@@ -46,6 +53,8 @@ export interface ExtractInput {
   tags: Record<string, TagRender>;
   /** Modules whose types become an `Element Attributes` row. */
   elementAttributeModules: string[];
+  /** Wording of the summary rows an intersection produces. Defaults to English. */
+  extras?: ResolvedExtras;
 }
 
 /**
@@ -160,6 +169,46 @@ function methodType(member: TSMethodSignature, code: string): string {
   return `${head} => ${tail}`;
 }
 
+/** A `@type` text and how it asked to be read. */
+interface TypeTag {
+  /** The text, braces removed. */
+  text: string;
+  /** `true` for `@type {X}` — TypeScript, to be resolved like a declared type. */
+  braced: boolean;
+}
+
+/**
+ * Read a `@type` text.
+ *
+ * JSDoc has always written a type inside braces, and that is the distinction
+ * propsmith needs: `@type {ButtonGenerics}` is a type — resolve it, split its
+ * union, link it — while `@type A CSS length` is the prose escape hatch and is
+ * printed as written. An object literal therefore doubles its braces, exactly
+ * as JSDoc's record syntax does: `@type {{ id: string }}`.
+ *
+ * Only a `{` closed by the very last character counts, so `{a} | {b}` is prose
+ * rather than a half-stripped type.
+ */
+function unbrace(text: string): TypeTag {
+  if (!text.startsWith("{") || !wrapsWholeText(text)) return { text, braced: false };
+  return { text: oneLine(text.slice(1, -1)), braced: true };
+}
+
+/** Whether the leading `{` of the text is closed by its very last character. */
+function wrapsWholeText(text: string): boolean {
+  let depth = 0;
+  for (let index = 0; index < text.length; index++) {
+    const char = text.charAt(index);
+    if (char === "{") depth++;
+    else if (char === "}") {
+      depth--;
+      if (depth === 0) return index === text.length - 1;
+      if (depth < 0) return false;
+    }
+  }
+  return false;
+}
+
 /** The string literals of a `Pick` / `Omit` key list, verbatim without quotes. */
 function literalKeys(node: TSType, code: string): string[] {
   const list = node.type === "TSUnionType" ? node.types : [node];
@@ -206,25 +255,46 @@ function elementOf(
   return undefined;
 }
 
-/** Turn one intersection branch or heritage clause into a summary row. */
-function toExtraRow(
-  branch: Branch,
-  code: string,
-  modules: Map<string, string>,
-  elementAttributeModules: string[],
-): ExtraRow {
+/** Everything `toExtraRow` needs that is the same for every branch in a file. */
+interface ExtraRowContext {
+  code: string;
+  /** Local name -> module it was imported from. */
+  modules: Map<string, string>;
+  elementAttributeModules: string[];
+  labels: ExtrasLabels;
+  /** Origin type name -> label, from `types.extras.origins`. */
+  origins: Record<string, string>;
+}
+
+/**
+ * Turn one intersection branch or heritage clause into a summary row.
+ *
+ * Three things can decide the Name cell, in this order: a `@type` written on
+ * the branch itself, a label configured for the origin type, and the template
+ * for the kind of row it is. The first is the author naming this one row by
+ * hand, which nothing should override.
+ *
+ * Every type name in a label goes inside a code span. A bare
+ * `HTMLAttributes<HTMLDivElement>` in live markdown opens an HTML tag, which is
+ * exactly what propsmith promises never to emit — and a bare `|` from a
+ * `Pick`'s key union would split the cell.
+ */
+function toExtraRow(branch: Branch, doc: ParsedJSDoc | undefined, ctx: ExtraRowContext): ExtraRow {
+  const { code } = ctx;
   const text = oneLine(code.slice(branch.start, branch.end));
+  // The branch's own sentence, which the row has a Description cell for.
+  const note = doc?.summary ?? "";
+  const written = writtenLabel(doc);
+
   const nameNode =
     branch.type === "TSInterfaceHeritage"
       ? branch.expression
       : branch.type === "TSTypeReference"
         ? branch.typeName
         : null;
-  // Every type name in a label goes inside a code span. A bare
-  // `HTMLAttributes<HTMLDivElement>` in live markdown opens an HTML tag, which
-  // is exactly what propsmith promises never to emit — and a bare `|` from a
-  // `Pick`'s key union would split the cell.
-  if (!nameNode) return { kind: "reference", label: codeSpan(text) };
+  if (!nameNode) {
+    return withNote({ kind: "reference", label: written ?? codeSpan(text) }, note);
+  }
 
   const name = oneLine(code.slice(nameNode.start, nameNode.end));
   const parts = name.split(".");
@@ -236,26 +306,82 @@ function toExtraRow(
     const kind = last === "Pick" ? "pick" : "omit";
     const origin = oneLine(code.slice(args.params[0].start, args.params[0].end));
     const keys = literalKeys(args.params[1], code);
+    // `Pick<X, K>` behind a type parameter has no keys to name, so the branch
+    // speaks for itself rather than reading `from X` with a gap in front of it.
+    const template = keys.length > 0 ? ctx.labels[kind] : "{text}";
+    const values = { keys, origin, text };
     const label =
-      keys.length > 0
-        ? `${keys.map((key) => codeSpan(key)).join(", ")} from ${codeSpan(origin)}`
-        : codeSpan(text);
-    return { kind, label, keys, origin };
+      written ?? configuredLabel(ctx.origins, origin, values) ?? formatExtraLabel(template, values);
+    return withNote({ kind, label, keys, origin }, note);
   }
 
-  const module = modules.get(head);
-  const fromModule = module !== undefined && elementAttributeModules.includes(module);
+  const module = ctx.modules.get(head);
+  const fromModule = module !== undefined && ctx.elementAttributeModules.includes(module);
   if (fromModule || ELEMENT_ATTRIBUTES.test(last)) {
     const element = elementOf(last, args, code);
-    return {
-      kind: "element-attributes",
-      label: element ? `Element Attributes (${codeSpan(element)})` : "Element Attributes",
-      ...(element ? { element } : {}),
-      origin: name,
-    };
+    const values = { element, origin: name, text };
+    const label =
+      written ??
+      configuredLabel(ctx.origins, name, values) ??
+      formatExtraLabel(ctx.labels.elementAttributes, values);
+    return withNote(
+      {
+        kind: "element-attributes",
+        label,
+        ...(element ? { element } : {}),
+        origin: name,
+      },
+      note,
+    );
   }
 
-  return { kind: "reference", label: codeSpan(text), origin: name };
+  const values = { origin: name, text };
+  return withNote(
+    {
+      kind: "reference",
+      label: written ?? configuredLabel(ctx.origins, name, values) ?? codeSpan(text),
+      origin: name,
+    },
+    note,
+  );
+}
+
+function withNote(row: ExtraRow, note: string): ExtraRow {
+  return note === "" ? row : { ...row, note };
+}
+
+/**
+ * The label an author wrote on the branch: `@type` on a JSDoc block attached to
+ * it. Braces are accepted and stripped, so `@type {X}` reads the same here as
+ * on a member, and the text is code-spanned because a `@type` names a type. For
+ * a label that is prose, use `types.extras.origins`.
+ */
+function writtenLabel(doc: ParsedJSDoc | undefined): string | undefined {
+  const tag = oneLine(doc?.tags.type?.[0] ?? "");
+  if (tag === "") return undefined;
+  return codeSpan(unbrace(tag).text);
+}
+
+/**
+ * The label configured for an origin type, looked up by the text as written
+ * (`PolymorphicProps<'span'>`) and then by the bare name, so one entry covers
+ * every instantiation. The value is a template like any other, which is what
+ * lets it be prose, a rewording, or both.
+ */
+function configuredLabel(
+  origins: Record<string, string>,
+  origin: string,
+  values: ExtraLabelValues,
+): string | undefined {
+  const base = origin.split("<")[0].trim();
+  for (const key of base === origin ? [origin] : [origin, base]) {
+    // `hasOwn`, because the config is a plain object and a type could in
+    // principle be named after something on `Object.prototype`.
+    if (!Object.hasOwn(origins, key)) continue;
+    const template = origins[key];
+    if (template.trim() !== "") return formatExtraLabel(template, values);
+  }
+  return undefined;
 }
 
 interface Analysis {
@@ -350,6 +476,7 @@ interface Collected {
 
 export function extractFile(input: ExtractInput): ExtractResult {
   const { filePath, code, lang, offset, originalSource, tags, elementAttributeModules } = input;
+  const extras = input.extras ?? { labels: DEFAULT_EXTRAS_LABELS, origins: {} };
   const components: ComponentDoc[] = [];
   const declarations: TypeDeclaration[] = [];
   const diagnostics: Diagnostic[] = [];
@@ -426,10 +553,13 @@ export function extractFile(input: ExtractInput): ExtractResult {
     }
   }
 
+  // A branch can carry a JSDoc block of its own — the only way to name one
+  // summary row by hand, and to give it a Description cell.
   const docTargets: Array<{ start: number }> = [];
   for (const entry of collected) {
     docTargets.push(entry.docNode);
     for (const member of entry.analysis.members) docTargets.push(member);
+    for (const branch of entry.analysis.branches) docTargets.push(branch);
   }
   const docs = attachComments(docTargets, parsed.comments, code);
 
@@ -470,7 +600,9 @@ export function extractFile(input: ExtractInput): ExtractResult {
 
       const defaultValue = oneLine(doc?.tags.default?.[0] ?? "");
       const see = oneLine(doc?.tags.see?.[0] ?? "");
-      const typeOverride = oneLine(doc?.tags.type?.[0] ?? "");
+      // `@type {X}` is TypeScript to resolve; `@type X` is prose to print.
+      const typeTag = oneLine(doc?.tags.type?.[0] ?? "");
+      const override = typeTag === "" ? null : unbrace(typeTag);
       const deprecated = doc?.tags.deprecated?.[0];
       const inherit = inheritTag(doc);
       const source = locate(member.start);
@@ -485,7 +617,12 @@ export function extractFile(input: ExtractInput): ExtractResult {
         ...(defaultValue === "" ? {} : { defaultValue }),
         ...(deprecated === undefined ? {} : { deprecated: oneLine(deprecated) || true }),
         ...(see === "" ? {} : { see }),
-        ...(typeOverride === "" ? {} : { typeOverride }),
+        ...(override === null
+          ? {}
+          : {
+              typeOverride: override.text,
+              typeOverrideKind: override.braced ? ("type" as const) : ("text" as const),
+            }),
         ...(inherit === undefined ? {} : { inheritDoc: inherit }),
         flags,
         source,
@@ -523,8 +660,14 @@ export function extractFile(input: ExtractInput): ExtractResult {
     const names = typeDoc?.tags.propsmith;
     if (!names || internalType) continue;
 
-    const extras = analysis.branches.map((branch) =>
-      toExtraRow(branch, code, modules, elementAttributeModules),
+    const extraRows = analysis.branches.map((branch) =>
+      toExtraRow(branch, docs.get(branch), {
+        code,
+        modules,
+        elementAttributeModules,
+        labels: extras.labels,
+        origins: extras.origins,
+      }),
     );
     const typeParameters =
       declaration.typeParameters?.params.map((parameter) =>
@@ -558,7 +701,7 @@ export function extractFile(input: ExtractInput): ExtractResult {
         typeName,
         typeParameters,
         members: members.slice(),
-        extras: extras.slice(),
+        extras: extraRows.slice(),
         source,
       });
       documented = true;

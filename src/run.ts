@@ -19,7 +19,7 @@ import { syncCatalog } from "./i18n/sync.js";
 import { scanRegions } from "./markers/scan.js";
 import { replaceRegions } from "./markers/write.js";
 import { alignTable, sameContent } from "./render/align.js";
-import { assertNoHtml } from "./render/escape.js";
+import { assertNoHtml, codeSpan } from "./render/escape.js";
 import { renderGlossary, type GlossaryEntry } from "./render/glossary.js";
 import { renderTable, type Deprecation } from "./render/table.js";
 import { createSymbolIndex, type SymbolIndex } from "./resolve/index.js";
@@ -139,6 +139,7 @@ async function extractAll(
       originalSource: file.source,
       tags: config.tags,
       elementAttributeModules: config.elementAttributeModules,
+      extras: config.types.extras,
     });
 
     diagnostics.push(...result.diagnostics);
@@ -190,7 +191,13 @@ async function expandIndex(
   const missing = new Set<string>();
   for (const component of components) {
     for (const member of component.members) {
-      for (const name of member.type.match(TYPE_NAME) ?? []) {
+      // A `@type {X}` override is resolved like a declared type, so the names
+      // in it have to be looked for in the same pass.
+      const text =
+        member.typeOverrideKind === "type" && member.typeOverride !== undefined
+          ? `${member.type} ${member.typeOverride}`
+          : member.type;
+      for (const name of text.match(TYPE_NAME) ?? []) {
         if (index.get(name) === undefined) missing.add(name);
       }
       // `@inheritDoc Variant` may name a type the member's own text never
@@ -220,6 +227,7 @@ async function expandIndex(
       originalSource: file.source,
       tags: config.tags,
       elementAttributeModules: config.elementAttributeModules,
+      extras: config.types.extras,
     });
     index.add(result.declarations);
   }
@@ -603,9 +611,15 @@ function renderComponent(
   const glossary = output.glossary ?? config.types.glossary;
 
   const renderTypeCell = (member: MemberDoc): string => {
-    if (member.typeOverride !== undefined) return `\`${member.typeOverride}\``;
+    const override = member.typeOverride;
+    // `@type A CSS length` is prose standing in for a type: printed as written,
+    // save for the pipe splitting every cell needs to survive the table.
+    if (override !== undefined && member.typeOverrideKind !== "type") return codeSpan(override);
 
-    const result = renderType(member.type, {
+    // `@type {ButtonGenerics}` is a type the author wrote instead of the
+    // declared one, so it earns everything a declared type gets: resolution,
+    // the glossary, `types.links`, and the same warnings when it comes short.
+    const result = renderType(override ?? member.type, {
       index,
       types: config.types,
       glossary,

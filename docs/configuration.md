@@ -109,17 +109,44 @@ Full semantics, including which tags are structural and need no declaration, in 
 
 ### `types`
 
-| field         | type                     | default | notes                                                                                                                                  |
-| ------------- | ------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `inlineUnder` | `number`                 | `60`    | max characters of a resolved definition that may replace the name. `0` disables inlining. A negative value is a `config-invalid` error |
-| `glossary`    | `string`                 | absent  | URL base for links to resolved-but-long types. `"#"` gives same-file anchors                                                           |
-| `links`       | `Record<string, string>` | `{}`    | type name to URL, for types propsmith can never resolve                                                                                |
-| `inherit`     | `boolean`                | `true`  | let an undocumented prop take the description and `@default` of its type. `@inheritDoc` works either way                               |
+| field         | type                     | default   | notes                                                                                                                                  |
+| ------------- | ------------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `inlineUnder` | `number`                 | `60`      | max characters of a resolved definition that may replace the name. `0` disables inlining. A negative value is a `config-invalid` error |
+| `glossary`    | `string`                 | absent    | URL base for links to resolved-but-long types. `"#"` gives same-file anchors                                                           |
+| `links`       | `Record<string, string>` | `{}`      | type name to URL, for types propsmith can never resolve                                                                                |
+| `inherit`     | `boolean`                | `true`    | let an undocumented prop take the description and `@default` of its type. `@inheritDoc` works either way                               |
+| `extras`      | `ExtrasConfig`           | see below | wording of the summary rows an intersection produces                                                                                   |
 
 `glossary` is a URL rather than a file path because propsmith can find the glossary file by its
 marker but cannot know that `docs/types.md` is served at `/docs/types`.
 
 The full fallback chain, and the rules for inherited descriptions, are in [types](./types.md).
+
+#### `types.extras`
+
+```ts
+types: {
+  extras: {
+    labels: {
+      pick: "{keys} from {origin}",
+      omit: "{origin} without {keys}",
+      elementAttributes: "Element Attributes ({element})",
+    },
+    origins: {
+      PolymorphicProps: "The element's own props",
+    },
+  },
+}
+```
+
+| field     | type                     | default           | notes                                                                                   |
+| --------- | ------------------------ | ----------------- | --------------------------------------------------------------------------------------- |
+| `labels`  | `Partial<ExtrasLabels>`  | the English above | one template per row kind. `{keys}`, `{origin}`, `{element}`, `{text}` are code-spanned |
+| `origins` | `Record<string, string>` | `{}`              | origin type name to the whole label, matched by the text as written and by bare name    |
+
+A template that uses a placeholder its row cannot fill, or that contains an HTML tag, is a
+`config-invalid` error. Both, and the JSDoc block that overrides one single row, are in
+[types](./types.md#intersections).
 
 ### `adapters`
 

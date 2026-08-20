@@ -7,11 +7,11 @@ What propsmith writes, and what it guarantees about the file it writes into.
 | column        | content                                                                                 |
 | ------------- | --------------------------------------------------------------------------------------- |
 | Name          | `` `name` `` in a code span; ``~~`name`~~`` when deprecated; badges appended as `_tag_` |
-| Type          | the resolved type, per [types](./types.md); replaced verbatim by `@type` when present   |
+| Type          | the resolved type, per [types](./types.md); `@type` overrides it — resolved when braced |
 | Default       | the `@default` value in a code span; empty when there is none                           |
 | Description   | the first JSDoc paragraph, one line; `**Deprecated:** reason` appended when present     |
 | a tag column  | the tag's text, or empty for a bare flag                                                |
-| a summary row | the label in Name; every other column empty                                             |
+| a summary row | the label in Name, the branch's own sentence in Description; every other column empty   |
 
 Row order is **declaration order** — the order you see in the editor — with intersection summary
 rows appended after the members. The heading of a tag column is the tag id Title Cased: `since`

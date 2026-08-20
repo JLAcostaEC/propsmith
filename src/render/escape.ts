@@ -91,6 +91,17 @@ function maskCodeSpans(markdown: string): string {
 }
 
 /**
+ * Whether the text opens an HTML tag anywhere outside a code span.
+ *
+ * Generated markdown is checked after the fact with {@link assertNoHtml}, but
+ * text arriving from the config can be checked before it is ever rendered — a
+ * config error beats an exception halfway through a run.
+ */
+export function containsHtmlTag(text: string): boolean {
+  return HTML_TAG.test(maskCodeSpans(text));
+}
+
+/**
  * Throws if the string contains an HTML tag. Used to enforce the no-HTML rule.
  *
  * Code spans are exempt, for the reason {@link maskCodeSpans} explains.

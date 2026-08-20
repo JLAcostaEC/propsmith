@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import type { ExtractInput } from "../src/extract/index.js";
 import { extractFile } from "../src/extract/index.js";
 import { assertNoHtml } from "../src/render/escape.js";
+import { DEFAULT_EXTRAS_LABELS } from "../src/render/extras.js";
 import type { ComponentDoc, ExtractResult, MemberDoc } from "../src/types.js";
 
 const FILE = "/src/props.ts";
@@ -319,6 +320,49 @@ describe("tags", () => {
     expect(onClick.type).toBe("unknown");
   });
 
+  it("tells a braced @type from prose", () => {
+    const component = sole(`
+      /** @propsmith Button */
+      export interface ButtonProps {
+        /** The tag. @type {ButtonGenerics} */
+        generic?: unknown;
+        /** Layout override. @type A CSS length */
+        width?: number | string;
+        /** The shape. @type {{ id: string; label: string }} */
+        item?: unknown;
+      }
+    `);
+
+    // Braced is TypeScript, to be resolved like a declared type.
+    const generic = member(component, "generic");
+    expect(generic.typeOverride).toBe("ButtonGenerics");
+    expect(generic.typeOverrideKind).toBe("type");
+
+    // Bare is the prose escape hatch, printed as written.
+    const width = member(component, "width");
+    expect(width.typeOverride).toBe("A CSS length");
+    expect(width.typeOverrideKind).toBe("text");
+
+    // JSDoc's record syntax: the outer braces say "type", the inner ones are it.
+    const item = member(component, "item");
+    expect(item.typeOverride).toBe("{ id: string; label: string }");
+    expect(item.typeOverrideKind).toBe("type");
+  });
+
+  it("reads a half-braced @type as prose, not as a stripped type", () => {
+    const component = sole(`
+      /** @propsmith Button */
+      export interface ButtonProps {
+        /** The size. @type {'sm'} or {'lg'} */
+        size?: unknown;
+      }
+    `);
+
+    const size = member(component, "size");
+    expect(size.typeOverride).toBe("{'sm'} or {'lg'}");
+    expect(size.typeOverrideKind).toBe("text");
+  });
+
   it("reads @deprecated as its reason, or as true when bare", () => {
     const component = sole(`
       /** @propsmith Button */
@@ -519,6 +563,140 @@ describe("intersections and heritage", () => {
       expect(() => assertNoHtml(extra.label, "Card")).not.toThrow();
     }
     expect(component.extras[0]!.label).toContain("`HTMLAttributes<HTMLDivElement>`");
+  });
+
+  it("reads an Omit as a subtraction, not as a Pick", () => {
+    const component = sole(`
+      /** @propsmith Card */
+      export type CardProps = {
+        /** The body. */
+        children: unknown;
+      } & Omit<PolymorphicProps<'span'>, 'children'>;
+    `);
+
+    // `children` is the one thing this branch does *not* contribute, so the
+    // `Pick` wording — "`children` from X" — said the opposite of the truth.
+    expect(component.extras[0]!.label).toBe("`PolymorphicProps<'span'>` without `children`");
+  });
+
+  it("drops the parentheses when the element cannot be named", () => {
+    const component = sole(`
+      /** @propsmith Card */
+      export type CardProps = {
+        /** The body. */
+        children: unknown;
+      } & HTMLAttributes;
+    `);
+
+    expect(component.extras[0]!.element).toBeUndefined();
+    expect(component.extras[0]!.label).toBe("Element Attributes");
+  });
+
+  it("takes the label and the note from a JSDoc block on the branch", () => {
+    const component = sole(`
+      /** @propsmith Card */
+      export type CardProps = {
+        /** The body. */
+        children: unknown;
+      } &
+        /** The element's own props. @type {PolymorphicProps<'span'>} */
+        Omit<PolymorphicProps<'span'>, 'children'>;
+    `);
+
+    const extra = component.extras[0]!;
+    // The tag names the row; the sentence fills the Description cell.
+    expect(extra.label).toBe("`PolymorphicProps<'span'>`");
+    expect(extra.note).toBe("The element's own props.");
+    // The data behind the row is untouched — only its wording changed.
+    expect(extra.kind).toBe("omit");
+    expect(extra.keys).toEqual(["children"]);
+  });
+
+  it("leaves an undocumented branch without a note", () => {
+    const component = sole(`
+      /** @propsmith Card */
+      export type CardProps = {
+        /** The body. */
+        children: unknown;
+      } & Themed;
+    `);
+
+    expect(component.extras[0]!.note).toBeUndefined();
+  });
+
+  it("takes the wording from types.extras.labels", () => {
+    const component = sole(
+      `
+      /** @propsmith Card */
+      export type CardProps = {
+        /** The body. */
+        children: unknown;
+      } & Pick<FSInput, 'a'> & Omit<FSInput, 'b'> & HTMLButtonAttributes;
+    `,
+      {
+        extras: {
+          labels: {
+            pick: "{origin}, solo {keys}",
+            omit: "{origin} sin {keys}",
+            elementAttributes: "Atributos del elemento ({element})",
+          },
+          origins: {},
+        },
+      },
+    );
+
+    expect(component.extras.map((extra) => extra.label)).toEqual([
+      "`FSInput`, solo `a`",
+      "`FSInput` sin `b`",
+      "Atributos del elemento (`button`)",
+    ]);
+  });
+
+  it("takes the whole label from types.extras.origins, by name or as written", () => {
+    const component = sole(
+      `
+      /** @propsmith Card */
+      export type CardProps = {
+        /** The body. */
+        children: unknown;
+      } & Omit<PolymorphicProps<'span'>, 'children'> & Themed;
+    `,
+      {
+        extras: {
+          labels: DEFAULT_EXTRAS_LABELS,
+          // The first entry is matched through the type arguments, the second
+          // exactly — and both are templates, so either can still interpolate.
+          origins: { PolymorphicProps: "The element itself ({keys} removed)", Themed: "Theming" },
+        },
+      },
+    );
+
+    expect(component.extras.map((extra) => extra.label)).toEqual([
+      "The element itself (`children` removed)",
+      "Theming",
+    ]);
+  });
+
+  it("lets a branch's own @type beat every configured label", () => {
+    const component = sole(
+      `
+      /** @propsmith Card */
+      export type CardProps = {
+        /** The body. */
+        children: unknown;
+      } &
+        /** @type ElementProps */
+        Omit<PolymorphicProps<'span'>, 'children'>;
+    `,
+      {
+        extras: {
+          labels: { ...DEFAULT_EXTRAS_LABELS, omit: "{origin} sin {keys}" },
+          origins: { PolymorphicProps: "Configured" },
+        },
+      },
+    );
+
+    expect(component.extras[0]!.label).toBe("`ElementProps`");
   });
 });
 
